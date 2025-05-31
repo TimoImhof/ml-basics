@@ -46,14 +46,14 @@ class AttentionHead(nn.Module):
         self.d_k = torch.tensor(config.hidden_dim)  # TODO: check if this makes sense
 
     def forward(self, X: torch.tensor) -> torch.tensor:
+        B, T, C = X.shape  # Batch size, sample size, token repr size
+
         K, Q, V = self.K(X), self.Q(X), self.V(X)
-        hidden_states = torch.matmul(Q, K.T)  # 512 x 64 @ 64 x 512 => 512 x 512
-        hidden_states = torch.div(hidden_states, torch.sqrt(self.d_k))
-        hidden_states = nn.functional.softmax(hidden_states, dim=-1)
-        hidden_states = torch.matmul(
-            hidden_states, V
-        )  #  512 x 512 @ 512 x 64 => 512 x 64
-        return hidden_states
+        W = Q @ K.transpose(-2, -1)  # (B,T,C) @ (B,C,T) -> (B,T,T)
+        W = torch.div(W, torch.sqrt(self.d_k))
+        W = nn.functional.softmax(W, dim=-1)
+        value_repr = W @ V  #  (B,T,T) @ (B,T,C) -> (B,T,C)
+        return value_repr
 
 
 class MultiHeadAttention(nn.Module):
@@ -124,6 +124,28 @@ class Encoder(nn.Module):
         for i, layer in enumerate(self.layers):
             X = layer(X)
         return X
+
+
+class MaskedAttentionHead(AttentionHead):
+    """
+    Masked Attention Head of a transformer of the Paper "Attention is All You Need".
+    """
+
+    def __init__(self, config: AttConfig, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, X: torch.tensor) -> torch.tensor:
+        B, T, C = X.shape  # Batch size, sample size, token repr size
+
+        K, Q, V = self.K(X), self.Q(X), self.V(X)
+        W = Q @ K.transpose(-2, -1)  # (B,T,C) @ (B,C,T) -> (B,T,T)
+        W = torch.div(W, torch.sqrt(self.d_k))
+
+        # Masked attention
+        W = W.masked_fill(torch.tril(torch.ones(T, T) == 0, float("-inf")))  # (B,T,T)
+        W = nn.functional.softmax(W, dim=-1)
+        value_repr = W @ V  # (B,T,T) @ (B,T,C) -> (B,T,C)
+        return value_repr
 
 
 # class Embedding(nn.Module):
