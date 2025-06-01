@@ -34,3 +34,20 @@ class EncoderLayerConfig:
 class EncoderConfig:
     num_layers: int = 6
     encoder_layer_config: EncoderLayerConfig = field(default_factory=EncoderLayerConfig)
+
+
+@dataclass
+class DecoderLayerConfig(EncoderLayerConfig):
+    pass
+
+
+@dataclass
+class DecoderConfig:
+    num_layers: int = 6
+    decoder_layer_config: DecoderLayerConfig = field(default_factory=DecoderLayerConfig)
+
+
+@dataclass
+class TransformerConfig:
+    encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
+    decoder_config: DecoderConfig = field(default_factory=DecoderConfig)

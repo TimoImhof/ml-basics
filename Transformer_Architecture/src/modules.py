@@ -6,14 +6,13 @@ from .configs import (
     MultiAttConfig,
     EncoderLayerConfig,
     EncoderConfig,
+    DecoderLayerConfig,
+    DecoderConfig,
+    TransformerConfig,
 )
 
 
 class FeedForward(nn.Module):
-    """
-    Position-wise Feed-Forward Network of the Paper "Attention Is All You Need".
-    Consists of two linear transformations with a ReLU activation in between.
-    """
 
     def __init__(self, config: FeedForwardConfig, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -30,11 +29,6 @@ class FeedForward(nn.Module):
 
 
 class AttentionHead(nn.Module):
-    """
-    Scaled Dot-Procut Attention Head of the Paper "Attention is All You Need".
-    Consists of learned linear representations key, query, value, which are matrix-multiplied in a special order.
-    This enables the module to predict based on a LEARNED representation of the ENTIRE previous context.
-    """
 
     def __init__(self, config: AttConfig, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -45,10 +39,14 @@ class AttentionHead(nn.Module):
         self.V = nn.Linear(config.in_features, config.hidden_dim)
         self.d_k = torch.tensor(config.hidden_dim)  # TODO: check if this makes sense
 
-    def forward(self, X: torch.tensor) -> torch.tensor:
+    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
         B, T, C = X.shape  # Batch size, sample size, token repr size
-
-        K, Q, V = self.K(X), self.Q(X), self.V(X)
+        if "enc_hidden_states" in kwargs:
+            enc_hidden_states = kwargs["enc_hidden_states"]
+            K, Q = self.K(enc_hidden_states), self.Q(enc_hidden_states)
+        else:
+            K, Q = self.K(X), self.Q(X)
+        V = self.V(X)
         W = Q @ K.transpose(-2, -1)  # (B,T,C) @ (B,C,T) -> (B,T,T)
         W = torch.div(W, torch.sqrt(self.d_k))
         W = nn.functional.softmax(W, dim=-1)
@@ -57,10 +55,6 @@ class AttentionHead(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    """
-    Multi-Head Attention of the Paper "Attention is All You Need".
-    Consists of multiple sub-dimensional attention heads whose output is concatenated and feed through a final linear layer.
-    """
 
     def __init__(self, config: MultiAttConfig, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -71,10 +65,10 @@ class MultiHeadAttention(nn.Module):
         ]
         self.proj = nn.Linear(config.proj_in_features, config.proj_out_features)
 
-    def forward(self, X: torch.tensor) -> torch.tensor:
+    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
         result = torch.zeros_like(X)
         for i, head in enumerate(self.heads):
-            sub_res = head(X)
+            sub_res = head(X, **kwargs)
             result[
                 :,
                 i
@@ -85,10 +79,6 @@ class MultiHeadAttention(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    """
-    Encoder layer of a an transformer style Encdoer of the Paper "Attention is All You Need".
-    A layer consists of multi-head self-attention mechanism and a positionwise fully connected feed-forward network.
-    """
 
     def __init__(self, config: EncoderLayerConfig, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -108,10 +98,6 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    """
-    Encoder of a transformer of the Paper "Attention is All You Need".
-    Consists of a series of layers each holding a multi-head Attention module and a feed-forward network.
-    """
 
     def __init__(self, config: EncoderConfig, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -127,11 +113,8 @@ class Encoder(nn.Module):
 
 
 class MaskedAttentionHead(AttentionHead):
-    """
-    Masked Attention Head of a transformer of the Paper "Attention is All You Need".
-    """
 
-    def __init__(self, config: AttConfig, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def forward(self, X: torch.tensor) -> torch.tensor:
@@ -146,6 +129,63 @@ class MaskedAttentionHead(AttentionHead):
         W = nn.functional.softmax(W, dim=-1)
         value_repr = W @ V  # (B,T,T) @ (B,T,C) -> (B,T,C)
         return value_repr
+
+
+class MaskedMultiHeadAttention(MaskedAttentionHead):
+
+    def __init__(self, config: MultiAttConfig, *args, **kwargs):
+        super().__init__(config, *args, **kwargs)
+
+        self.heads = [
+            MaskedAttentionHead(config=config.head_config)
+            for _ in range(config.n_heads)
+        ]
+
+
+class DecoderLayer(nn.Module):
+
+    def __init__(self, config: DecoderLayerConfig, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config = config
+        self.multihead_att = MultiHeadAttention(config.multi_att_config)
+        self.multihead_mask_att = MaskedMultiHeadAttention(config.multi_att_config)
+        self.ff = FeedForward(config.ff_config)
+        self.norm = nn.LayerNorm(config.norm_shape)
+
+    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
+        m_att_out = self.multihead_mask_att(X)
+        m_interm = self.norm(m_att_out + X)
+
+        att_out = self.multihead_att(X, **kwargs)
+        interm = self.norm(att_out + m_interm)
+
+        ff_out = self.ff(interm)
+        final = self.norm(ff_out + interm)
+        return final
+
+
+class Decoder(nn.Module):
+    def __init__(self, config: DecoderConfig, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config = config
+        self.layers = nn.ModuleList(
+            DecoderLayer(config.decoder_layer_config) for _ in range(config.num_layers)
+        )
+
+    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
+        for i, layer in enumerate(self.layers):
+            X = layer(X, **kwargs)
+        return X
+
+
+class Transformer(nn.Module):
+
+    def __init__(self, config: TransformerConfig, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config = config
+        self.encoder = Encoder(config.encoder_config)
+        self.decoder = Decoder(config.decoder_config)
+        # TODO self.embedding =
 
 
 # class Embedding(nn.Module):
