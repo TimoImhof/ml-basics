@@ -43,8 +43,6 @@ class AttentionHead(nn.Module):
     def forward(
         self, K_in: torch.tensor, V_in: torch.tensor, Q_in: torch.tensor, **kwargs
     ) -> torch.tensor:
-        B, T, C = K_in.shape  # Batch size, sample size, token repr size
-
         K, Q, V = self.K(K_in), self.Q(Q_in), self.V(V_in)
         W = Q @ K.transpose(-2, -1) * self.scale  # (B,T,C) @ (B,C,T) -> (B,T,T)
         W = nn.functional.softmax(W, dim=-1)
@@ -72,7 +70,8 @@ class MultiHeadAttention(nn.Module):
             result[
                 :,
                 :,
-                i * self.config.head_config.hidden_dim : (i + 1)
+                i
+                * self.config.head_config.hidden_dim : (i + 1)
                 * self.config.head_config.hidden_dim
             ] = sub_res
         return self.proj(result)
@@ -88,10 +87,8 @@ class EncoderLayer(nn.Module):
         self.norm = nn.LayerNorm(config.norm_shape)
 
     def forward(self, X: torch.tensor) -> torch.tensor:
-        residual = X
         att_output = self.multihead_att(X, X, X)
-        interm = self.norm(att_output + residual)
-
+        interm = self.norm(att_output + X)
         ff_output = self.ff(interm)
         res = self.norm(ff_output + interm)
         return res
@@ -107,7 +104,7 @@ class Encoder(nn.Module):
         )
 
     def forward(self, X: torch.tensor) -> torch.tensor:
-        for i, layer in enumerate(self.layers):
+        for _, layer in enumerate(self.layers):
             X = layer(X)
         return X
 
@@ -117,15 +114,16 @@ class MaskedAttentionHead(AttentionHead):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def forward(self, X: torch.tensor) -> torch.tensor:
-        B, T, C = X.shape  # Batch size, sample size, token repr size
+    def forward(
+        self, K_in: torch.tensor, V_in: torch.tensor, Q_in: torch.tensor, **kwargs
+    ) -> torch.tensor:
+        _, T, _ = K_in.shape
 
-        K, Q, V = self.K(X), self.Q(X), self.V(X)
-        W = Q @ K.transpose(-2, -1)  # (B,T,C) @ (B,C,T) -> (B,T,T)
-        W = torch.div(W, torch.sqrt(self.d_k))
+        K, Q, V = self.K(K_in), self.Q(Q_in), self.V(V_in)
+        W = Q @ K.transpose(-2, -1) * self.scale  # (B,T,C) @ (B,C,T) -> (B,T,T)
 
         # Masked attention
-        W = W.masked_fill(torch.tril(torch.ones(T, T) == 0, float("-inf")))  # (B,T,T)
+        W = W.masked_fill(torch.tril(torch.ones(T, T)) == 0, float("-inf"))  # (B,T,T)
         W = nn.functional.softmax(W, dim=-1)
         value_repr = W @ V  # (B,T,T) @ (B,T,C) -> (B,T,C)
         return value_repr
@@ -152,11 +150,15 @@ class DecoderLayer(nn.Module):
         self.ff = FeedForward(config.ff_config)
         self.norm = nn.LayerNorm(config.norm_shape)
 
-    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
-        m_att_out = self.multihead_mask_att(X)
+    def forward(
+        self, X: torch.tensor, enc_hidden_state: torch.tensor, **kwargs
+    ) -> torch.tensor:
+        m_att_out = self.multihead_mask_att(X, X, X)
         m_interm = self.norm(m_att_out + X)
 
-        att_out = self.multihead_att(X, **kwargs)
+        att_out = self.multihead_att(
+            K_in=enc_hidden_state, V_in=enc_hidden_state, Q_in=m_interm, **kwargs
+        )
         interm = self.norm(att_out + m_interm)
 
         ff_out = self.ff(interm)
@@ -172,9 +174,11 @@ class Decoder(nn.Module):
             DecoderLayer(config.decoder_layer_config) for _ in range(config.num_layers)
         )
 
-    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
-        for i, layer in enumerate(self.layers):
-            X = layer(X, **kwargs)
+    def forward(
+        self, X: torch.tensor, end_hidden_state: torch.tensor, **kwargs
+    ) -> torch.tensor:
+        for _, layer in enumerate(self.layers):
+            X = layer(X, end_hidden_state, **kwargs)
         return X
 
 
@@ -191,7 +195,7 @@ class Embedding(nn.Module):
         self.hidden_dim = config.hidden_dim
 
     def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
-        B, T = X.shape  # Batch size, sample size, token repr size
+        B, T = X.shape  # Batch size, sample size
 
         word_emb = self.word_embedding(X)
         pos_emb = torch.zeros(T, self.hidden_dim)
@@ -216,10 +220,11 @@ class Transformer(nn.Module):
         super().__init__(*args, **kwargs)
         self.config = config
         self.encoder = Encoder(config.encoder_config)
-        # self.decoder = Decoder(config.decoder_config)
+        self.decoder = Decoder(config.decoder_config)
         self.embedding = Embedding(config.embedding_config)
 
     def forward(self, X: torch.tensor) -> torch.tensor:
         emb_X = self.embedding(X)
         enc_X = self.encoder(emb_X)
-        return enc_X
+        dec_X = self.decoder(emb_X, enc_X)
+        return dec_X
