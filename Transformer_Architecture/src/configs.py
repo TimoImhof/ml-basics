@@ -49,7 +49,7 @@ class DecoderConfig:
 
 @dataclass
 class EmbeddingConfig:
-    num_embeddings: int = 32768
+    vocab_size: int = 32768
     hidden_dim: int = 512
     padding_idx: int = 0
     pos_n: int = 10000

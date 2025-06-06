@@ -132,7 +132,7 @@ class MaskedAttentionHead(AttentionHead):
         return value_repr
 
 
-class MaskedMultiHeadAttention(MaskedAttentionHead):
+class MaskedMultiHeadAttention(MultiHeadAttention):
 
     def __init__(self, config: MultiAttConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
@@ -191,25 +191,36 @@ class Embedding(nn.Module):
         self.pos_n = config.pos_n
         self.hidden_dim = config.hidden_dim
 
+    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
+        B, T = X.shape  # Batch size, sample size, token repr size
 
-def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
-    B, T, C = X.shape  # Batch size, sample size, token repr size
+        word_emb = self.word_embedding(X)
+        pos_emb = torch.zeros(T, self.hidden_dim)
 
-    word_emb = self.word_embedding(X)
-    pos_emb = torch.zeros(T, C)
+        token_positions = torch.arange(T, dtype=torch.float).unsqueeze(1)
+        token_enc_indices = torch.arange(0, self.hidden_dim, 2, dtype=torch.float)
 
-    token_positions = torch.arange(T, dtype=torch.float).unsqueeze(1)
-    even_dims_in_token_repr = torch.arange(0, self.hidden_dim, 2, dtype=torch.float)
-    odd_dims_in_token_repr = torch.arange(1, self.hidden_dim - 1, 2, dtype=torch.float)
+        pos_emb[:, 0::2] = torch.sin(
+            token_positions / (self.pos_n ** (token_enc_indices / self.hidden_dim))
+        )
+        pos_emb[:, 1::2] = torch.cos(
+            token_positions / (self.pos_n ** (token_enc_indices / self.hidden_dim))
+        )
 
-    pos_emb[:, 0::2] = torch.sin(
-        token_positions / (self.pos_n ** (even_dims_in_token_repr / self.hidden_dim))
-    )
-    pos_emb[:, 1::2] = torch.cos(
-        token_positions / (self.pos_n ** ((odd_dims_in_token_repr) / self.hidden_dim))
-    )
+        pos_emb = pos_emb.unsqueeze(0).expand(B, -1, -1)  # (B,T,C)
+        return word_emb + pos_emb
 
-    pos_emb = pos_emb.unsqueeze(0).expand(B, -1, -1)  # (B,T,C)
-    return word_emb + pos_emb
 
-        
+class Transformer(nn.Module):
+
+    def __init__(self, config: TransformerConfig, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config = config
+        self.encoder = Encoder(config.encoder_config)
+        self.decoder = Decoder(config.decoder_config)
+        self.embedding = Embedding(config.embedding_config)
+
+    def forward(self, X: torch.tensor) -> torch.tensor:
+        emb_X = self.embedding(X)
+        enc_X = self.encoder(emb_X)
+        return enc_X
