@@ -38,18 +38,15 @@ class AttentionHead(nn.Module):
         self.K = nn.Linear(config.in_features, config.hidden_dim)
         self.Q = nn.Linear(config.in_features, config.hidden_dim)
         self.V = nn.Linear(config.in_features, config.hidden_dim)
-        self.d_k = torch.tensor(config.hidden_dim)  # TODO: check if this makes sense
+        self.scale = config.hidden_dim**-0.5
 
-    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
-        B, T, C = X.shape  # Batch size, sample size, token repr size
-        if "enc_hidden_states" in kwargs:
-            enc_hidden_states = kwargs["enc_hidden_states"]
-            K, Q = self.K(enc_hidden_states), self.Q(enc_hidden_states)
-        else:
-            K, Q = self.K(X), self.Q(X)
-        V = self.V(X)
-        W = Q @ K.transpose(-2, -1)  # (B,T,C) @ (B,C,T) -> (B,T,T)
-        W = torch.div(W, torch.sqrt(self.d_k))
+    def forward(
+        self, K_in: torch.tensor, V_in: torch.tensor, Q_in: torch.tensor, **kwargs
+    ) -> torch.tensor:
+        B, T, C = K_in.shape  # Batch size, sample size, token repr size
+
+        K, Q, V = self.K(K_in), self.Q(Q_in), self.V(V_in)
+        W = Q @ K.transpose(-2, -1) * self.scale  # (B,T,C) @ (B,C,T) -> (B,T,T)
         W = nn.functional.softmax(W, dim=-1)
         value_repr = W @ V  #  (B,T,T) @ (B,T,C) -> (B,T,C)
         return value_repr
@@ -66,15 +63,17 @@ class MultiHeadAttention(nn.Module):
         ]
         self.proj = nn.Linear(config.proj_in_features, config.proj_out_features)
 
-    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
-        result = torch.zeros_like(X)
+    def forward(
+        self, K_in: torch.tensor, V_in: torch.tensor, Q_in: torch.tensor, **kwargs
+    ) -> torch.tensor:
+        result = torch.zeros_like(K_in)
         for i, head in enumerate(self.heads):
-            sub_res = head(X, **kwargs)
+            sub_res = head(K_in, V_in, Q_in, **kwargs)
             result[
                 :,
-                i
-                * self.config.head_config.hidden_dim : (i + 1)
-                * self.config.head_config.hidden_dim,
+                :,
+                i * self.config.head_config.hidden_dim : (i + 1)
+                * self.config.head_config.hidden_dim
             ] = sub_res
         return self.proj(result)
 
@@ -90,7 +89,7 @@ class EncoderLayer(nn.Module):
 
     def forward(self, X: torch.tensor) -> torch.tensor:
         residual = X
-        att_output = self.multihead_att(X)
+        att_output = self.multihead_att(X, X, X)
         interm = self.norm(att_output + residual)
 
         ff_output = self.ff(interm)
@@ -217,7 +216,7 @@ class Transformer(nn.Module):
         super().__init__(*args, **kwargs)
         self.config = config
         self.encoder = Encoder(config.encoder_config)
-        self.decoder = Decoder(config.decoder_config)
+        # self.decoder = Decoder(config.decoder_config)
         self.embedding = Embedding(config.embedding_config)
 
     def forward(self, X: torch.tensor) -> torch.tensor:
