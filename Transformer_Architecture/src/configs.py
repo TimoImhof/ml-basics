@@ -48,6 +48,15 @@ class DecoderConfig:
 
 
 @dataclass
+class EmbeddingConfig:
+    num_embeddings: int = 32768
+    hidden_dim: int = 512
+    padding_idx: int = 0
+    pos_n: int = 10000
+
+
+@dataclass
 class TransformerConfig:
     encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
     decoder_config: DecoderConfig = field(default_factory=DecoderConfig)
+    embedding_config: EmbeddingConfig = field(default_factory=EmbeddingConfig)

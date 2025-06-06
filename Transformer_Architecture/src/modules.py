@@ -9,6 +9,7 @@ from .configs import (
     DecoderLayerConfig,
     DecoderConfig,
     TransformerConfig,
+    EmbeddingConfig,
 )
 
 
@@ -178,27 +179,37 @@ class Decoder(nn.Module):
         return X
 
 
-class Transformer(nn.Module):
+class Embedding(nn.Module):
 
-    def __init__(self, config: TransformerConfig, *args, **kwargs):
+    def __init__(self, config: EmbeddingConfig, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.config = config
-        self.encoder = Encoder(config.encoder_config)
-        self.decoder = Decoder(config.decoder_config)
-        # TODO self.embedding =
+        self.word_embedding = nn.Embedding(
+            num_embeddings=config.vocab_size,
+            embedding_dim=config.hidden_dim,
+            padding_idx=config.padding_idx,
+        )
+        self.pos_n = config.pos_n
+        self.hidden_dim = config.hidden_dim
 
 
-# class Embedding(nn.Module):
-#     """
-#     Learned Embedding Layer from the Paper "Attention is All You Need".
-#     Converts input tokens into vectors (numerical representation) for the model as input.
-#     """
+def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
+    B, T, C = X.shape  # Batch size, sample size, token repr size
 
-#     def __init__(self, vocab_size: int, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.emb = nn.Embedding(
-#             num_embeddings=vocab_size, embedding_dim=512, padding_idx=0
-#         )
+    word_emb = self.word_embedding(X)
+    pos_emb = torch.zeros(T, C)
 
-#     def forward(self, X: torch.tensor) -> torch.tensor:
-#         return self.emb(X)
+    token_positions = torch.arange(T, dtype=torch.float).unsqueeze(1)
+    even_dims_in_token_repr = torch.arange(0, self.hidden_dim, 2, dtype=torch.float)
+    odd_dims_in_token_repr = torch.arange(1, self.hidden_dim - 1, 2, dtype=torch.float)
+
+    pos_emb[:, 0::2] = torch.sin(
+        token_positions / (self.pos_n ** (even_dims_in_token_repr / self.hidden_dim))
+    )
+    pos_emb[:, 1::2] = torch.cos(
+        token_positions / (self.pos_n ** ((odd_dims_in_token_repr) / self.hidden_dim))
+    )
+
+    pos_emb = pos_emb.unsqueeze(0).expand(B, -1, -1)  # (B,T,C)
+    return word_emb + pos_emb
+
+        

@@ -1,11 +1,12 @@
-from src.configs import EncoderConfig
+from src.configs import TransformerConfig
 import torch
-from src.modules import Encoder
+from src.modules import Encoder, Transformer
 
 X = torch.rand(size=[32, 512])
 
-config = EncoderConfig()
-encoder = Encoder(config)
 
-out = encoder(X)
-print(out.shape)
+
+model = Transformer(config=TransformerConfig())
+print(model)
+y = model.forward(X)
+print(y.shape)
