@@ -56,7 +56,15 @@ class EmbeddingConfig:
 
 
 @dataclass
+class DecoderHeadConfig:
+    vocab_size: int = 32768
+    hidden_dim: int = 512
+
+
+@dataclass
 class TransformerConfig:
     encoder_config: EncoderConfig = field(default_factory=EncoderConfig)
     decoder_config: DecoderConfig = field(default_factory=DecoderConfig)
     embedding_config: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    decoder_head_config: DecoderHeadConfig = field(default_factory=DecoderHeadConfig)
+    share_weights_between_embedding_and_head: bool = True

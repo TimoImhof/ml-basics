@@ -10,6 +10,7 @@ from .configs import (
     DecoderConfig,
     TransformerConfig,
     EmbeddingConfig,
+    DecoderHeadConfig,
 )
 
 
@@ -215,18 +216,33 @@ class Embedding(nn.Module):
         return word_emb + pos_emb
 
 
+class DecoderHead(nn.Module):
+
+    def __init__(self, config: DecoderHeadConfig, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ff1 = nn.Linear(config.hidden_dim, config.vocab_size)
+
+    def forward(self, X: torch.tensor) -> torch.tensor:
+        raw_output_logits = self.ff1(X)
+        return nn.functional.softmax(raw_output_logits, dim=-1)
+
+
 class Transformer(nn.Module):
 
     def __init__(self, config: TransformerConfig, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config = config
+        self.embedding = Embedding(config.embedding_config)
         self.encoder = Encoder(config.encoder_config)
         self.decoder = Decoder(config.decoder_config)
-        self.embedding = Embedding(config.embedding_config)
+        self.head = DecoderHead(config.decoder_head_config)
+
+        if config.share_weights_between_embedding_and_head:
+            self.head.ff1.weight = self.embedding.word_embedding.weight
 
     def forward(self, X_enc: torch.tensor, X_dec: torch.tensor) -> torch.tensor:
         emb_X_enc = self.embedding(X_enc)
         emb_X_dec = self.embedding(X_dec)
         enc_X = self.encoder(emb_X_enc)
         dec_X = self.decoder(emb_X_dec, enc_X)
-        return dec_X
+        return self.head(dec_X)
