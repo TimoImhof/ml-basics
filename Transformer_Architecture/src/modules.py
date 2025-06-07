@@ -72,7 +72,7 @@ class MultiHeadAttention(nn.Module):
                 :,
                 i
                 * self.config.head_config.hidden_dim : (i + 1)
-                * self.config.head_config.hidden_dim
+                * self.config.head_config.hidden_dim,
             ] = sub_res
         return self.proj(result)
 
@@ -193,11 +193,12 @@ class Embedding(nn.Module):
         )
         self.pos_n = config.pos_n
         self.hidden_dim = config.hidden_dim
+        self.scale = config.hidden_dim**0.5
 
     def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
         B, T = X.shape  # Batch size, sample size
 
-        word_emb = self.word_embedding(X)
+        word_emb = self.word_embedding(X) * self.scale
         pos_emb = torch.zeros(T, self.hidden_dim)
 
         token_positions = torch.arange(T, dtype=torch.float).unsqueeze(1)
@@ -223,8 +224,9 @@ class Transformer(nn.Module):
         self.decoder = Decoder(config.decoder_config)
         self.embedding = Embedding(config.embedding_config)
 
-    def forward(self, X: torch.tensor) -> torch.tensor:
-        emb_X = self.embedding(X)
-        enc_X = self.encoder(emb_X)
-        dec_X = self.decoder(emb_X, enc_X)
+    def forward(self, X_enc: torch.tensor, X_dec: torch.tensor) -> torch.tensor:
+        emb_X_enc = self.embedding(X_enc)
+        emb_X_dec = self.embedding(X_dec)
+        enc_X = self.encoder(emb_X_enc)
+        dec_X = self.decoder(emb_X_dec, enc_X)
         return dec_X
