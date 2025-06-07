@@ -26,7 +26,7 @@ class FeedForward(nn.Module):
         self.ff2 = nn.Linear(config.out_features, config.in_features)
         self.act_fct = config.act_fct
 
-    def forward(self, X: torch.tensor) -> torch.tensor:
+    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
         return self.ff2(self.act_fct(self.ff1(X)))
 
 
@@ -87,7 +87,7 @@ class EncoderLayer(nn.Module):
         self.ff = FeedForward(config.ff_config)
         self.norm = nn.LayerNorm(config.norm_shape)
 
-    def forward(self, X: torch.tensor) -> torch.tensor:
+    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
         att_output = self.multihead_att(X, X, X)
         interm = self.norm(att_output + X)
         ff_output = self.ff(interm)
@@ -104,7 +104,7 @@ class Encoder(nn.Module):
             EncoderLayer(config.encoder_layer_config) for _ in range(config.num_layers)
         )
 
-    def forward(self, X: torch.tensor) -> torch.tensor:
+    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
         for _, layer in enumerate(self.layers):
             X = layer(X)
         return X
@@ -123,7 +123,6 @@ class MaskedAttentionHead(AttentionHead):
         K, Q, V = self.K(K_in), self.Q(Q_in), self.V(V_in)
         W = Q @ K.transpose(-2, -1) * self.scale  # (B,T,C) @ (B,C,T) -> (B,T,T)
 
-        # Masked attention
         W = W.masked_fill(torch.tril(torch.ones(T, T)) == 0, float("-inf"))  # (B,T,T)
         W = nn.functional.softmax(W, dim=-1)
         value_repr = W @ V  # (B,T,T) @ (B,T,C) -> (B,T,C)
@@ -197,7 +196,7 @@ class Embedding(nn.Module):
         self.scale = config.hidden_dim**0.5
 
     def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
-        B, T = X.shape  # Batch size, sample size
+        B, T = X.shape
 
         word_emb = self.word_embedding(X) * self.scale
         pos_emb = torch.zeros(T, self.hidden_dim)
@@ -222,7 +221,7 @@ class DecoderHead(nn.Module):
         super().__init__(*args, **kwargs)
         self.ff1 = nn.Linear(config.hidden_dim, config.vocab_size)
 
-    def forward(self, X: torch.tensor) -> torch.tensor:
+    def forward(self, X: torch.tensor, **kwargs) -> torch.tensor:
         raw_output_logits = self.ff1(X)
         return nn.functional.softmax(raw_output_logits, dim=-1)
 
@@ -240,7 +239,9 @@ class Transformer(nn.Module):
         if config.share_weights_between_embedding_and_head:
             self.head.ff1.weight = self.embedding.word_embedding.weight
 
-    def forward(self, X_enc: torch.tensor, X_dec: torch.tensor) -> torch.tensor:
+    def forward(
+        self, X_enc: torch.tensor, X_dec: torch.tensor, **kwargs
+    ) -> torch.tensor:
         emb_X_enc = self.embedding(X_enc)
         emb_X_dec = self.embedding(X_dec)
         enc_X = self.encoder(emb_X_enc)
