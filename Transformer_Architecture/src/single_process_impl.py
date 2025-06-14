@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Set, List, Tuple, Optional
+from typing import Set, List, Tuple, Optional, DefaultDict
 from collections import defaultdict
 from tqdm import tqdm
 import numpy as np
@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 class BytePairEncoderConfig:
     vocab: Set[str] = field(default_factory=set)
     vocab_size: int = 37000
-    end_of_word_token: str = "</w>"
+    eow_token: str = "</w>"
     out_of_vocab_idx: int = 0
 
 
