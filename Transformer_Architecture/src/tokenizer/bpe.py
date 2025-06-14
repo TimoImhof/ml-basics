@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 
 
 @dataclass
-class BytePairEncoder_Config:
+class BytePairEncoderConfig:
     vocab: Set[str] = field(default_factory=set)
     vocab_size: int = 37000
     end_of_word_token: str = "</w>"
@@ -15,7 +15,7 @@ class BytePairEncoder_Config:
 
 
 class BytePairEncoder:
-    def __init__(self, config: BytePairEncoder_Config):
+    def __init__(self, config: BytePairEncoderConfig):
         self.config = config
         # bpe vocabulary building
         self.vocab = config.vocab
